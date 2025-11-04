@@ -2,7 +2,10 @@ import os
 import cv2
 import numpy as np
 from PIL import Image
+from transformers import TrOCRProcessor, VisionEncoderDecoderModel
 
+trocr_processor = TrOCRProcessor.from_pretrained("microsoft/trocr-base-handwritten")
+trocr_model = VisionEncoderDecoderModel.from_pretrained("microsoft/trocr-base-handwritten")
 
 def apply_binarization(image_path, save_path=None, method='otsu', threshold=127, 
                       adaptive_method=cv2.ADAPTIVE_THRESH_GAUSSIAN_C, block_size=11, C=2):
@@ -68,3 +71,30 @@ def apply_binarization(image_path, save_path=None, method='otsu', threshold=127,
         cv2.imwrite(save_path, binary)
     
     return binary
+
+
+def transcribe_text_with_trocr(image_path):
+    """
+    Transcribe text from an image using TrOCR
+    
+    Args:
+        image_path: Path to the image file
+        
+    Returns:
+        Transcribed text string
+    """
+    try:
+        # Load and convert image
+        image = Image.open(image_path).convert("RGB")
+        
+        # Process image
+        pixel_values = trocr_processor(image, return_tensors="pt").pixel_values
+        
+        # Generate transcription
+        generated_ids = trocr_model.generate(pixel_values)
+        transcribed_text = trocr_processor.batch_decode(generated_ids, skip_special_tokens=True)[0]
+        
+        return transcribed_text
+    
+    except Exception as e:
+        return f"Error transcribing: {str(e)}"

@@ -5,7 +5,7 @@ import cv2
 from ultralytics import YOLO
 import uuid
 import json
-from utils import apply_binarization
+from utils import apply_binarization, transcribe_text_with_trocr 
 
 app = Flask(__name__)
 
@@ -56,12 +56,18 @@ def segment_document():
         if results.boxes is not None:
             for idx, box in enumerate(results.boxes):
                 x1, y1, x2, y2 = map(int, box.xyxy[0].tolist())
+                class_id = int(box.cls[0])
+                class_name = model.names[class_id]
                 
                 # Crop and save segment FROM BINARIZED IMAGE
                 cropped = binarized_img[y1:y2, x1:x2]
                 segment_filename = f"segment_{idx}.jpg"
                 segment_path = os.path.join(request_folder, segment_filename)
                 cv2.imwrite(segment_path, cropped)
+                
+                transcription = None
+                if class_name == 'text':
+                    transcription = transcribe_text_with_trocr(segment_path)
                 
                 # Store location info for stitching
                 segments.append({
@@ -73,8 +79,9 @@ def segment_document():
                         'width': x2 - x1,
                         'height': y2 - y1
                     },
-                    'class': model.names[int(box.cls[0])],
-                    'confidence': float(box.conf[0])
+                    'class': class_name,
+                    'confidence': float(box.conf[0]),
+                    'transcription': transcription  # ADDED: Store transcription if available
                 })
         
         # Prepare metadata
