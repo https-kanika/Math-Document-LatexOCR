@@ -1,30 +1,59 @@
-from flask import Flask, request, jsonify
+from flask import Flask, request, jsonify, send_file, render_template
 from werkzeug.utils import secure_filename
 import os
 import cv2
 from ultralytics import YOLO
 import uuid
 import json
-from utils import apply_binarization, transcribe_text_with_trocr 
+import torch
+from utils import (
+    apply_binarization, 
+    transcribe_text_with_trocr, 
+    load_latex_model, 
+    transcribe_latex_with_wap,
+    read_metadata_and_generate_tex  # ADD THIS
+)
 
 app = Flask(__name__)
 
 # Configuration
 UPLOAD_FOLDER = 'uploads'
 OUTPUT_FOLDER = 'outputs'
-MODEL_PATH = r"C:\Users\kani1\Desktop\Errorcode500_results\working\document_detection_model.pt"
+MODEL_PATH = r"segmentation_model\document_detection_model.pt"
+LATEX_CHECKPOINT = r"math_model\checkpoint_best.pth"  
+WORD2IDX_PATH = r"vocab\word2idx.pkl"  
+IDX2WORD_PATH = r"vocab\idx2word.pkl"  
 
 os.makedirs(UPLOAD_FOLDER, exist_ok=True)
 os.makedirs(OUTPUT_FOLDER, exist_ok=True)
 
-# Load model
+# Load YOLO model
 model = YOLO(MODEL_PATH)
+
+# Load LaTeX transcription model (WAP)
+print("Loading LaTeX transcription model...")
+latex_encoder, latex_decoder, word2idx, idx2word, latex_device = load_latex_model(
+    checkpoint_path=LATEX_CHECKPOINT,
+    word2idx_path=WORD2IDX_PATH,
+    idx2word_path=IDX2WORD_PATH,
+    device='cuda' if torch.cuda.is_available() else 'cpu'
+)
+print("LaTeX model loaded successfully!")
+
+@app.route('/')
+def index():
+    """Serve the main HTML page"""
+    return render_template('home.html')
+
 
 @app.route('/segment', methods=['POST'])
 def segment_document():
     try:
         if 'image' not in request.files:
             return jsonify({'error': 'No image provided'}), 400
+        
+        # Check if LaTeX generation is requested
+        generate_latex = request.form.get('generate_latex', 'true').lower() == 'true'
         
         file = request.files['image']
         request_id = str(uuid.uuid4())
@@ -35,11 +64,11 @@ def segment_document():
         input_path = os.path.join(UPLOAD_FOLDER, f"{request_id}_{file.filename}")
         file.save(input_path)
         
-        # ADDED: Binarize the input image using Otsu method
+        # Binarize the input image using Otsu method
         binarized_path = os.path.join(request_folder, 'binarized_input.jpg')
         binarized_img = apply_binarization(input_path, save_path=binarized_path, method='otsu')
         
-        # Read original image for dimensions (using binarized for processing)
+        # Read original image for dimensions
         original_image = cv2.imread(input_path)
         img_height, img_width = original_image.shape[:2]
         
@@ -65,9 +94,27 @@ def segment_document():
                 segment_path = os.path.join(request_folder, segment_filename)
                 cv2.imwrite(segment_path, cropped)
                 
+                # TRANSCRIPTION LOGIC
                 transcription = None
+                
                 if class_name == 'text':
+                    # Use TrOCR for text
+                    print("Transcribing text segment with TrOCR...")
                     transcription = transcribe_text_with_trocr(segment_path)
+                    
+                elif class_name in ['equation', 'symbol']:
+                    # Use WAP model for equations and symbols
+                    print("Transcribing LaTeX segment with WAP model...")
+                    transcription = transcribe_latex_with_wap(
+                        image_path=segment_path,
+                        encoder=latex_encoder,
+                        decoder=latex_decoder,
+                        word2idx=word2idx,
+                        idx2word=idx2word,
+                        device=latex_device,
+                        beam_width=10,
+                        max_len=150
+                    )
                 
                 # Store location info for stitching
                 segments.append({
@@ -81,7 +128,7 @@ def segment_document():
                     },
                     'class': class_name,
                     'confidence': float(box.conf[0]),
-                    'transcription': transcription  # ADDED: Store transcription if available
+                    'transcription': transcription
                 })
         
         # Prepare metadata
@@ -107,20 +154,77 @@ def segment_document():
         with open(metadata_path, 'w') as f:
             json.dump(metadata, f, indent=2)
         
-        # return jsonify({
-        #     'request_id': request_id,
-        #     'image_size': {'width': img_width, 'height': img_height},
-        #     'preprocessing': 'otsu_binarization',
-        #     'segments': segments,
-        #     'output_folder': request_folder,
-        #     'metadata_file': metadata_path,
-        #     'binarized_image': binarized_path,
-        #     'annotated_image': annotated_path
-        # }), 200
-        return jsonify({'message': 'Segmentation completed - Great Success', 'request_id': request_id}), 200
+        # Generate LaTeX document if requested
+        latex_file_path = None
+        if generate_latex:
+            try:
+                output_tex_path = os.path.join(request_folder, 'document.tex')
+                latex_file_path = read_metadata_and_generate_tex(metadata_path, output_tex_path)
+                print(f"LaTeX document generated: {latex_file_path}")
+            except Exception as latex_error:
+                print(f"Error generating LaTeX: {str(latex_error)}")
+                latex_file_path = f"Error: {str(latex_error)}"
+        
+        response = {
+            'message': 'Segmentation and transcription completed successfully!',
+            'request_id': request_id,
+            'image_size': {'width': img_width, 'height': img_height},
+            'total_segments': len(segments),
+            'output_folder': request_folder,
+            'files': {
+                'metadata': metadata_path,
+                'annotated_image': annotated_path,
+                'binarized_image': binarized_path,
+                'latex_document': latex_file_path
+            }
+        }
+        
+        return jsonify(response), 200
     
     except Exception as e:
         return jsonify({'error': str(e)}), 500
+
+
+@app.route('/download/<request_id>/<filename>', methods=['GET'])
+def download_file(request_id, filename):
+    """
+    Download any file from a request folder (metadata.json, document.tex, images, etc.)
+    """
+    try:
+        file_path = os.path.join(OUTPUT_FOLDER, request_id, filename)
+        
+        if not os.path.exists(file_path):
+            return jsonify({'error': 'File not found'}), 404
+        
+        return send_file(file_path, as_attachment=True)
+    
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+
+@app.route('/latex/<request_id>', methods=['GET'])
+def get_latex_document(request_id):
+    """
+    Get the LaTeX document content as text
+    """
+    try:
+        latex_path = os.path.join(OUTPUT_FOLDER, request_id, 'document.tex')
+        
+        if not os.path.exists(latex_path):
+            return jsonify({'error': 'LaTeX document not found'}), 404
+        
+        with open(latex_path, 'r', encoding='utf-8') as f:
+            latex_content = f.read()
+        
+        return jsonify({
+            'request_id': request_id,
+            'latex_content': latex_content,
+            'file_path': latex_path
+        }), 200
+    
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
 
 if __name__ == '__main__':
     app.run(debug=True, port=5000)
