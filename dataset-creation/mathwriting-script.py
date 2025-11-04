@@ -36,7 +36,7 @@ def get_traces_data(inkml_file_abs_path, xmlns='{http://www.w3.org/2003/InkML}')
     
     return traces_data
 
-def convert_to_img(traces_data, width=1600, height=480, is_symbol=False, quality='medium'):
+def convert_to_img(traces_data, width=800, height=240, is_symbol=False, quality='medium'):
     """
     Convert traces to images with configurable quality settings for math expressions
     Uses square dimensions for symbols and rectangular for regular expressions

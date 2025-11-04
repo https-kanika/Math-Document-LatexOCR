@@ -208,3 +208,8 @@ __marimo__/
 
 segmentation/yolo-fine-tuning/results
 math-ocr/evaluation_results
+
+pipline/__pycache__/
+pipeline/__pycache__/
+pipeline/outputs/
+pipeline/uploads/
