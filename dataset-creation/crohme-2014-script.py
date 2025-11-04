@@ -5,6 +5,8 @@ import argparse
 from tqdm import tqdm
 import numpy as np
 import cv2
+import glob
+import random
 
 def get_traces_data(inkml_file_abs_path, xmlns='{http://www.w3.org/2003/InkML}'):
     """Extract trace data from InkML file (handles 2 or 3 channels: X, Y, and optional T)"""
@@ -165,116 +167,211 @@ def convert_to_img_dynamic(traces_data, target_height=240, min_width=200, max_wi
     
     return img, width, height
 
-def convert_crohme2014_samples(input_dir, output_dir, max_files=10, quality='medium'):
+def inkml2img_robust(input_path, output_path, quality='medium', compression=6):
     """
-    Convert a few CROHME 2014 InkML files to images for testing
+    Convert InkML to PNG image
+    
+    Returns:
+        Tuple of (success: bool, width: int, height: int)
+    """
+    try:
+        traces_data = get_traces_data(input_path)
+        if not traces_data:
+            return False, 0, 0
+        
+        img, width, height = convert_to_img_dynamic(traces_data, quality=quality)
+        
+        # Create directory if it doesn't exist
+        os.makedirs(os.path.dirname(output_path), exist_ok=True)
+        
+        # Save with compression
+        cv2.imwrite(output_path, img, [cv2.IMWRITE_PNG_COMPRESSION, compression])
+        return True, width, height
+    except Exception as e:
+        print(f"Error converting {input_path}: {str(e)}")
+        return False, 0, 0
+
+def process_crohme2014_dataset(base_dir, output_dir, max_files=None, quality='medium', compression=6):
+    """
+    Process CROHME 2014 dataset with train and test folders
     
     Args:
-        input_dir: Directory containing InkML files
-        output_dir: Output directory for images
-        max_files: Maximum number of files to convert
+        base_dir: Base directory containing train/ and test/ folders with InkML files
+        output_dir: Output directory for images and CSV
+        max_files: Maximum number of files to process per split (for testing)
         quality: Quality level ('low', 'medium', 'high')
+        compression: PNG compression level (0-9)
     """
-    print(f"Looking for InkML files in: {input_dir}")
+    print(f"Processing CROHME 2014 dataset from: {base_dir}")
     
-    if not os.path.exists(input_dir):
-        print(f"ERROR: Input directory '{input_dir}' does not exist!")
-        return
+    if not os.path.exists(base_dir):
+        print(f"ERROR: Input directory '{base_dir}' does not exist!")
+        return pd.DataFrame()
     
-    # Create output directory
+    # Create output directories
     os.makedirs(output_dir, exist_ok=True)
+    os.makedirs(os.path.join(output_dir, "train"), exist_ok=True)
+    os.makedirs(os.path.join(output_dir, "test"), exist_ok=True)
     
-    # Find InkML files
-    import glob
-    inkml_files = glob.glob(os.path.join(input_dir, "*.inkml"))
+    # Find InkML files in train and test folders
+    all_files = []
     
-    if not inkml_files:
-        print(f"No InkML files found in {input_dir}")
-        return
+    for split in ['train', 'test']:
+        split_dir = os.path.join(base_dir, split)
+        
+        if not os.path.exists(split_dir):
+            print(f"Warning: {split} directory not found: {split_dir}")
+            continue
+        
+        # Find all InkML files
+        inkml_files = glob.glob(os.path.join(split_dir, "*.inkml"))
+        print(f"Found {len(inkml_files)} InkML files in {split}/")
+        
+        # Limit files if specified
+        if max_files and max_files > 0:
+            random.seed(42)
+            random.shuffle(inkml_files)
+            inkml_files = inkml_files[:max_files]
+            print(f"  Limited to {len(inkml_files)} files for testing")
+        
+        for inkml_file in inkml_files:
+            all_files.append({
+                'path': inkml_file,
+                'split': split
+            })
     
-    # Limit number of files
-    inkml_files = inkml_files[:max_files]
+    if not all_files:
+        print("ERROR: No InkML files found!")
+        return pd.DataFrame()
     
-    print(f"\nConverting {len(inkml_files)} InkML files to images...")
-    print(f"Quality level: {quality}")
+    print(f"\nProcessing {len(all_files)} InkML files...")
+    print(f"Quality level: {quality}, compression: {compression}")
     
     data = []
+    widths = []
+    heights = []
     
-    for inkml_file in tqdm(inkml_files, desc="Converting"):
+    for file_info in tqdm(all_files, desc="Converting InkML to PNG"):
         try:
+            inkml_path = file_info['path']
+            split = file_info['split']
+            
             # Extract sample ID
-            sample_id = os.path.basename(inkml_file).replace('.inkml', '')
+            sample_id = os.path.basename(inkml_path).replace('.inkml', '')
             
             # Extract LaTeX label
-            latex_label = extract_latex_label(inkml_file)
+            latex_label = extract_latex_label(inkml_path)
             
-            # Get traces
-            traces_data = get_traces_data(inkml_file)
-            
-            if not traces_data:
-                print(f"No traces found in {inkml_file}")
+            if not latex_label:
+                print(f"Warning: No label found for {sample_id}")
                 continue
             
-            # Convert to image
-            img, width, height = convert_to_img_dynamic(traces_data, quality=quality)
+            # Define output path
+            png_filename = f"{sample_id}.png"
+            png_path = os.path.join(output_dir, split, png_filename)
             
-            # Save image
-            output_path = os.path.join(output_dir, f"{sample_id}.png")
-            cv2.imwrite(output_path, img, [cv2.IMWRITE_PNG_COMPRESSION, 6])
+            # Convert to PNG
+            success, width, height = inkml2img_robust(inkml_path, png_path, quality, compression)
+            
+            if not success:
+                print(f"Failed to convert {sample_id}")
+                continue
+            
+            # Track dimensions
+            widths.append(width)
+            heights.append(height)
             
             # Store data
             data.append({
-                'filename': f"{sample_id}.png",
+                'filename': png_filename,
                 'sample_id': sample_id,
                 'label': latex_label,
-                'width': width,
-                'height': height,
-                'original_file': inkml_file
+                'split': split,
+                'image_width': width,
+                'image_height': height,
+                'original_path': inkml_path
             })
             
-            print(f"\n✓ Converted: {sample_id}")
-            print(f"  Label: {latex_label}")
-            print(f"  Dimensions: {width}x{height}")
-            
         except Exception as e:
-            print(f"Error processing {inkml_file}: {str(e)}")
-            import traceback
-            traceback.print_exc()
+            print(f"Error processing {file_info['path']}: {str(e)}")
     
-    # Create CSV
-    if data:
-        df = pd.DataFrame(data)
-        csv_path = os.path.join(output_dir, "converted_samples.csv")
-        df.to_csv(csv_path, index=False)
-        
-        print(f"\n{'='*60}")
-        print(f"Successfully converted {len(data)} files")
-        print(f"Images saved to: {output_dir}")
-        print(f"CSV saved to: {csv_path}")
-        print(f"\nDimension statistics:")
-        print(f"  Width:  min={df['width'].min()}, max={df['width'].max()}, avg={int(df['width'].mean())}")
-        print(f"  Height: min={df['height'].min()}, max={df['height'].max()}, avg={int(df['height'].mean())}")
-        print(f"{'='*60}")
-    else:
-        print("No files were converted successfully!")
+    if not data:
+        print("No data was processed successfully!")
+        return pd.DataFrame()
+    
+    # Create DataFrame
+    df = pd.DataFrame(data)
+    
+    # Print statistics
+    print("\n" + "="*60)
+    print("Dataset statistics:")
+    split_stats = df['split'].value_counts()
+    for split, count in split_stats.items():
+        print(f"  {split}: {count} samples ({count/len(df)*100:.1f}%)")
+    
+    # Print dimension statistics
+    if widths and heights:
+        print(f"\nImage dimension statistics:")
+        print(f"  Width:  min={min(widths)}, max={max(widths)}, avg={int(np.mean(widths))}")
+        print(f"  Height: min={min(heights)}, max={max(heights)}, avg={int(np.mean(heights))}")
+    
+    # Save main CSV
+    csv_path = os.path.join(output_dir, "crohme2014_database.csv")
+    df.to_csv(csv_path, index=False)
+    print(f"\nFull CSV saved to: {csv_path}")
+    
+    # Save split-specific CSVs
+    for split_name in df['split'].unique():
+        split_df = df[df['split'] == split_name]
+        split_csv = os.path.join(output_dir, f"{split_name}_database.csv")
+        split_df.to_csv(split_csv, index=False)
+        print(f"Saved {split_name} CSV with {len(split_df)} entries: {split_csv}")
+    
+    # Save simplified CSV
+    simplified_df = df[['filename', 'sample_id', 'label', 'split', 'image_width', 'image_height']]
+    simplified_csv = os.path.join(output_dir, "crohme2014_database_simplified.csv")
+    simplified_df.to_csv(simplified_csv, index=False)
+    print(f"Simplified CSV saved to: {simplified_csv}")
+    
+    print(f"\nDatabase created with {len(df)} entries")
+    print(f"Images saved in: {os.path.join(output_dir, '[train|test]')}")
+    print("="*60)
+    
+    return df
 
 if __name__ == "__main__":
-    parser = argparse.ArgumentParser(description='Test CROHME 2014 InkML to PNG converter')
+    parser = argparse.ArgumentParser(description='Convert CROHME 2014 InkML files to PNG and create database')
     parser.add_argument('--input', type=str, required=True,
-                        help='Directory containing InkML files')
+                        help='Base directory containing train/ and test/ folders')
     parser.add_argument('--output', type=str, required=True,
-                        help='Output directory for images')
-    parser.add_argument('--max', type=int, default=10,
-                        help='Maximum number of files to convert (default: 10)')
+                        help='Output directory for images and CSV')
+    parser.add_argument('--max', type=int, default=None,
+                        help='Maximum number of files to process per split (for testing)')
     parser.add_argument('--quality', type=str, default='medium', 
                         choices=['low', 'medium', 'high'],
                         help='Quality level for rendered images')
+    parser.add_argument('--compression', type=int, default=6, choices=range(0, 10),
+                        help='PNG compression level (0-9)')
     
     args = parser.parse_args()
     
-    convert_crohme2014_samples(
+    print("CROHME 2014 Dataset Processor")
+    print(f"Input directory: {args.input}")
+    print(f"Output directory: {args.output}")
+    print(f"Max files per split: {args.max if args.max else 'All'}")
+    print(f"Quality: {args.quality}")
+    print(f"Compression: {args.compression}")
+    print()
+    
+    df = process_crohme2014_dataset(
         args.input.rstrip('\\/"\''),
         args.output.rstrip('\\/"\''),
         args.max,
-        args.quality
+        args.quality,
+        args.compression
     )
+    
+    if df.empty:
+        print("\nERROR: No data was processed!")
+    else:
+        print(f"\n✓ Successfully processed {len(df)} files")
