@@ -5,6 +5,7 @@ import cv2
 from ultralytics import YOLO
 import uuid
 import json
+from utils import apply_binarization
 
 app = Flask(__name__)
 
@@ -34,13 +35,19 @@ def segment_document():
         input_path = os.path.join(UPLOAD_FOLDER, f"{request_id}_{file.filename}")
         file.save(input_path)
         
-        # Read image and run YOLO
-        image = cv2.imread(input_path)
-        img_height, img_width = image.shape[:2]
-        results = model.predict(source=input_path, imgsz=1024)[0]
+        # ADDED: Binarize the input image using Otsu method
+        binarized_path = os.path.join(request_folder, 'binarized_input.jpg')
+        binarized_img = apply_binarization(input_path, save_path=binarized_path, method='otsu')
+        
+        # Read original image for dimensions (using binarized for processing)
+        original_image = cv2.imread(input_path)
+        img_height, img_width = original_image.shape[:2]
+        
+        # Run YOLO on the BINARIZED image
+        results = model.predict(source=binarized_path, imgsz=1024)[0]
         
         # Save annotated image with bounding boxes
-        annotated_image = results.plot()  # This draws boxes, labels, and confidence scores
+        annotated_image = results.plot()
         annotated_path = os.path.join(request_folder, 'predicted_image.jpg')
         cv2.imwrite(annotated_path, annotated_image)
         
@@ -50,8 +57,8 @@ def segment_document():
             for idx, box in enumerate(results.boxes):
                 x1, y1, x2, y2 = map(int, box.xyxy[0].tolist())
                 
-                # Crop and save segment
-                cropped = image[y1:y2, x1:x2]
+                # Crop and save segment FROM BINARIZED IMAGE
+                cropped = binarized_img[y1:y2, x1:x2]
                 segment_filename = f"segment_{idx}.jpg"
                 segment_path = os.path.join(request_folder, segment_filename)
                 cv2.imwrite(segment_path, cropped)
@@ -78,6 +85,10 @@ def segment_document():
                 'width': img_width,
                 'height': img_height
             },
+            'preprocessing': {
+                'binarization': 'otsu',
+                'binarized_image': 'binarized_input.jpg'
+            },
             'coordinate_type': 'absolute_pixels',
             'total_segments': len(segments),
             'segments': segments,
@@ -92,12 +103,14 @@ def segment_document():
         # return jsonify({
         #     'request_id': request_id,
         #     'image_size': {'width': img_width, 'height': img_height},
+        #     'preprocessing': 'otsu_binarization',
         #     'segments': segments,
         #     'output_folder': request_folder,
         #     'metadata_file': metadata_path,
+        #     'binarized_image': binarized_path,
         #     'annotated_image': annotated_path
         # }), 200
-        return jsonify("Great success"), 200
+        return jsonify({'message': 'Segmentation completed - Great Success', 'request_id': request_id}), 200
     
     except Exception as e:
         return jsonify({'error': str(e)}), 500
