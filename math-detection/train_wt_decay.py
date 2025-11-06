@@ -1395,10 +1395,10 @@ def main():
     
     if improvement > 0:
         print(f"Improvement:                            {improvement:.4f} ({improvement_pct:.2f}%)")
-        print("✅ Model improved with weight noise annealing!")
+        print("Model improved with weight noise annealing!")
     else:
         print(f"Change:                                 {improvement:.4f} ({improvement_pct:.2f}%)")
-        print("⚠️ No improvement - consider trying different hyperparameters")
+        print("No improvement - consider trying different hyperparameters")
     
     print("="*80)
     print("\nAnnealing Hyperparameters Used:")
