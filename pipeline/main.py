@@ -11,7 +11,7 @@ from utils import (
     transcribe_text_with_trocr, 
     load_latex_model, 
     transcribe_latex_with_wap,
-    read_metadata_and_generate_tex  # ADD THIS
+    read_metadata_and_generate_tex 
 )
 
 app = Flask(__name__)
@@ -20,9 +20,9 @@ app = Flask(__name__)
 UPLOAD_FOLDER = 'uploads'
 OUTPUT_FOLDER = 'outputs'
 MODEL_PATH = r"segmentation_model\document_detection_model.pt"
-LATEX_CHECKPOINT = r"math_model\checkpoint_best.pth"  
-WORD2IDX_PATH = r"vocab\word2idx.pkl"  
-IDX2WORD_PATH = r"vocab\idx2word.pkl"  
+LATEX_CHECKPOINT = r"C:\Users\kani1\Desktop\IE643\Math-Document-LatexOCR\math-detection\checkpoint_annealed_best.pth"  
+WORD2IDX_PATH = r"C:\Users\kani1\Desktop\IE643\Math-Document-LatexOCR\pipeline\word2idx.pkl"  
+IDX2WORD_PATH = r"C:\Users\kani1\Desktop\IE643\Math-Document-LatexOCR\pipeline\idx2word.pkl"  
 
 os.makedirs(UPLOAD_FOLDER, exist_ok=True)
 os.makedirs(OUTPUT_FOLDER, exist_ok=True)
@@ -52,7 +52,6 @@ def segment_document():
         if 'image' not in request.files:
             return jsonify({'error': 'No image provided'}), 400
         
-        # Check if LaTeX generation is requested
         generate_latex = request.form.get('generate_latex', 'true').lower() == 'true'
         
         file = request.files['image']
@@ -60,27 +59,21 @@ def segment_document():
         request_folder = os.path.join(OUTPUT_FOLDER, request_id)
         os.makedirs(request_folder, exist_ok=True)
         
-        # Save input image
         input_path = os.path.join(UPLOAD_FOLDER, f"{request_id}_{file.filename}")
         file.save(input_path)
         
-        # Binarize the input image using Otsu method
         binarized_path = os.path.join(request_folder, 'binarized_input.jpg')
         binarized_img = apply_binarization(input_path, save_path=binarized_path, method='otsu')
         
-        # Read original image for dimensions
         original_image = cv2.imread(input_path)
         img_height, img_width = original_image.shape[:2]
         
-        # Run YOLO on the BINARIZED image
         results = model.predict(source=binarized_path, imgsz=1024)[0]
         
-        # Save annotated image with bounding boxes
         annotated_image = results.plot()
         annotated_path = os.path.join(request_folder, 'predicted_image.jpg')
         cv2.imwrite(annotated_path, annotated_image)
         
-        # Process detections
         segments = []
         if results.boxes is not None:
             for idx, box in enumerate(results.boxes):
@@ -88,22 +81,18 @@ def segment_document():
                 class_id = int(box.cls[0])
                 class_name = model.names[class_id]
                 
-                # Crop and save segment FROM BINARIZED IMAGE
                 cropped = binarized_img[y1:y2, x1:x2]
                 segment_filename = f"segment_{idx}.jpg"
                 segment_path = os.path.join(request_folder, segment_filename)
                 cv2.imwrite(segment_path, cropped)
                 
-                # TRANSCRIPTION LOGIC
                 transcription = None
                 
                 if class_name == 'text':
-                    # Use TrOCR for text
                     print("Transcribing text segment with TrOCR...")
                     transcription = transcribe_text_with_trocr(segment_path)
                     
                 elif class_name in ['equation', 'symbol']:
-                    # Use WAP model for equations and symbols
                     print("Transcribing LaTeX segment with WAP model...")
                     transcription = transcribe_latex_with_wap(
                         image_path=segment_path,
@@ -116,7 +105,6 @@ def segment_document():
                         max_len=150
                     )
                 
-                # Store location info for stitching
                 segments.append({
                     'id': idx,
                     'filename': segment_filename,
@@ -131,7 +119,6 @@ def segment_document():
                     'transcription': transcription
                 })
         
-        # Prepare metadata
         metadata = {
             'request_id': request_id,
             'original_image': {
@@ -149,12 +136,10 @@ def segment_document():
             'annotated_image': 'predicted_image.jpg'
         }
         
-        # Save metadata to JSON file
         metadata_path = os.path.join(request_folder, 'metadata.json')
         with open(metadata_path, 'w') as f:
             json.dump(metadata, f, indent=2)
         
-        # Generate LaTeX document if requested
         latex_file_path = None
         if generate_latex:
             try:

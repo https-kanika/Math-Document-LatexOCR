@@ -307,6 +307,7 @@ def transcribe_latex_with_wap(image_path, encoder, decoder, word2idx, idx2word, 
         print(traceback.format_exc())  # Print full traceback for debugging
         return error_msg
 
+t="L(y, y)=-\sum"
 def escape_latex_text(s: str) -> str:
     """
     Escape characters that have special meaning in LaTeX for plain text segments.
@@ -450,3 +451,4 @@ def read_metadata_and_generate_tex(metadata_path, output_tex_path):
     print(f"  Valid transcriptions: {len(valid_segments)}")
     
     return str(output_tex_path)
+    
