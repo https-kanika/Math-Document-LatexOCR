@@ -213,3 +213,10 @@ pipline/__pycache__/
 pipeline/__pycache__/
 pipeline/outputs/
 pipeline/uploads/
+
+math-detection/__pycache__/
+math-detection/5channel_visualizations/
+math-detection/tmp/
+math-detection/visualizations/
+math-detection/visualizations_batch/
+math-detection/visualizations_symbols_batch/

@@ -3,12 +3,20 @@ import cv2
 import numpy as np
 from PIL import Image
 from transformers import TrOCRProcessor, VisionEncoderDecoderModel
-from math_model.model_mumz import FullyConvolutionalNetwork, GRUDecoder, reshape_fcn_output
+import sys
+from pathlib import Path
+#from math_model.model_mumz import FullyConvolutionalNetwork, GRUDecoder, reshape_fcn_output
+parent_dir = Path(__file__).parent.parent
+sys.path.insert(0, str(parent_dir / "math-detection"))
+
+# Now import from model_final
+from model_final import FullyConvolutionalNetwork, GRUDecoder, reshape_fcn_output
+
 import torch
 import pickle
 import json
 import os
-from pathlib import Path
+
 
 trocr_processor = TrOCRProcessor.from_pretrained("microsoft/trocr-base-handwritten")
 trocr_model = VisionEncoderDecoderModel.from_pretrained("microsoft/trocr-base-handwritten")
@@ -451,4 +459,3 @@ def read_metadata_and_generate_tex(metadata_path, output_tex_path):
     print(f"  Valid transcriptions: {len(valid_segments)}")
     
     return str(output_tex_path)
-    

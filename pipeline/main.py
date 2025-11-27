@@ -21,8 +21,8 @@ UPLOAD_FOLDER = 'uploads'
 OUTPUT_FOLDER = 'outputs'
 MODEL_PATH = r"segmentation_model\document_detection_model.pt"
 LATEX_CHECKPOINT = r"C:\Users\kani1\Desktop\IE643\Math-Document-LatexOCR\math-detection\checkpoint_annealed_best.pth"  
-WORD2IDX_PATH = r"C:\Users\kani1\Desktop\IE643\Math-Document-LatexOCR\pipeline\word2idx.pkl"  
-IDX2WORD_PATH = r"C:\Users\kani1\Desktop\IE643\Math-Document-LatexOCR\pipeline\idx2word.pkl"  
+WORD2IDX_PATH = r"C:\Users\kani1\Desktop\IE643\Math-Document-LatexOCR\pipeline\vocab\word2idx.pkl"  
+IDX2WORD_PATH = r"C:\Users\kani1\Desktop\IE643\Math-Document-LatexOCR\pipeline\vocab\idx2word.pkl"  
 
 os.makedirs(UPLOAD_FOLDER, exist_ok=True)
 os.makedirs(OUTPUT_FOLDER, exist_ok=True)
