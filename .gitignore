@@ -232,3 +232,4 @@ math-detection/checkpoint_annealed_best.pth
 math-detection/checkpoint_epoch_45.pth
 pipeline/vocab
 segmentation/yolo-fine-tuning/Errorcode500_results
+math-detection/wap-symbols/results
